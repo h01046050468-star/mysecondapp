@@ -1,103 +1,133 @@
+
+```python
 import streamlit as st
 import pandas as pd
-import numpy as np
+import plotly.express as px
 
-# 1. 페이지 기본 설정
 st.set_page_config(page_title="수업 활동 점검 대시보드", layout="wide")
 
 st.title("📊 수업 활동 점검 대시보드")
-st.caption("학생들의 활동 결과를 분석하고 회의용 요약을 제공합니다.")
-st.markdown("---")
 
-# 2. 사이드바 - 파일 업로드 및 필터
-with st.sidebar:
-    st.header("⚙️ 설정 및 업로드")
-    uploaded_file = st.file_uploader("활동 결과 CSV 파일을 업로드하세요.", type=["csv"])
-    
-    st.markdown("---")
-    st.subheader("🔒 개인정보 보호")
-    mask_name = st.checkbox("학생 이름 마스킹 (student_id 표시)")
-    
-    st.markdown("---")
-    st.subheader("🔍 필터")
-    selected_class = st.selectbox("학급(반) 선택", ["전체", "1반", "2반", "3반"])
-    selected_group = st.multiselect("모둠 선택", ["1모둠", "2모둠", "3모둠", "4모둠", "5모둠"])
+uploaded_file = st.file_uploader(
+    "CSV 파일 업로드",
+    type=["csv"]
+)
 
-# 3. 데이터 로드 및 대시보드 표시 (파일이 없을 경우 가상 데이터 생성)
 if uploaded_file is not None:
+
     df = pd.read_csv(uploaded_file)
-else:
-    st.info("💡 샘플 데이터로 대시보드를 시연 중입니다. 실제 데이터를 보시려면 왼쪽에서 CSV 파일을 업로드해주세요.")
-    # 테스트용 가상 데이터 생성
-    np.random.seed(42)
-    df = pd.DataFrame({
-        'student_id': [f"2026_{i:02d}" for i in range(1, 31)],
-        'name': [f"학생{i}" for i in range(1, 31)],
-        'class': np.random.choice(["1반", "2반", "3반"], 30),
-        'group': np.random.choice(["1모둠", "2모둠", "3모둠", "4모둠", "5모둠"], 30),
-        'submitted': np.random.choice(["Y", "N"], 30, p=[0.8, 0.2]),
-        'score': np.random.randint(50, 101, 30)
-    })
-    # 미제출자는 점수 0점 처리
-    df.loc[df['submitted'] == 'N', 'score'] = 0
 
-# 이름 마스킹 처리 적용
-if mask_name:
-    df['display_name'] = df['student_id']
-else:
-    df['display_name'] = df['name']
+    st.subheader("업로드 데이터 미리보기")
+    st.dataframe(df.head())
 
-# 필터링 적용
-filtered_df = df.copy()
-if selected_class != "전체":
-    filtered_df = filtered_df[filtered_df['class'] == selected_class]
-if selected_group:
-    filtered_df = filtered_df[filtered_df['group'].isin(selected_group)]
+    # 컬럼 확인
+    required_cols = [
+        'student_id',
+        'student_name',
+        'class',
+        'group',
+        'submission_status',
+        'score',
+        'needs_support'
+    ]
 
-# 4. 메인 대시보드 레이아웃
-# [상단] 주요 지표 (Metrics)
-total_students = len(filtered_df)
-submitted_count = len(filtered_df[filtered_df['submitted'] == 'Y'])
-submission_rate = (submitted_count / total_students * 100) if total_students > 0 else 0
-avg_score = filtered_df[filtered_df['submitted'] == 'Y']['score'].mean() if submitted_count > 0 else 0
-not_submitted_count = total_students - submitted_count
+    missing = [col for col in required_cols if col not in df.columns]
 
-col1, col2, col3 = st.columns(3)
-col1.metric(label="✅ 제출률", value=f"{submission_rate:.1f}%", delta=f"{submitted_count}/{total_students} 명")
-col2.metric(label="💯 제출자 평균 점수", value=f"{avg_score:.1f}점")
-col3.metric(label="⚠️ 미제출 학생 수", value=f"{not_submitted_count}명", delta_color="inverse")
+    if missing:
+        st.error(f"누락된 컬럼: {missing}")
+        st.stop()
 
-st.markdown("---")
+    # 이름 표시 옵션
+    show_real_name = st.checkbox("학생 이름 표시", value=False)
 
-# [중단] 시각화 및 테이블
-col_left, col_right = st.columns([1, 1])
-
-with col_left:
-    st.subheader("👥 모둠별 평균 점수 현황")
-    group_chart_data = filtered_df.groupby('group')['score'].mean().reset_index()
-    st.bar_chart(data=group_chart_data, x='group', y='score', color="#1E3A8A")
-
-with col_right:
-    st.subheader("🚨 미제출 / 보완 필요 대상 (70점 미만)")
-    need_attention = filtered_df[(filtered_df['submitted'] == 'N') | (filtered_df['score'] < 70)]
-    display_cols = ['class', 'group', 'display_name', 'submitted', 'score']
-    
-    if not need_attention.empty:
-        st.dataframe(need_attention[display_cols].reset_index(drop=True), use_container_width=True)
+    if show_real_name:
+        df['display_name'] = df['student_name']
     else:
-        st.success("모든 학생이 과제를 제출했고, 보완이 필요한 학생이 없습니다!")
+        df['display_name'] = df['student_id']
 
-st.markdown("---")
+    # 필터
+    selected_class = st.selectbox(
+        "반 선택",
+        ["전체"] + sorted(df['class'].unique().tolist())
+    )
 
-# [하단] 회의용 요약 브리핑 (향후 기능 선구현)
-st.subheader("📝 교과협의회용 요약 브리핑 리포트")
-summary_text = f"""[수업 활동 점검 브리핑]
-- 대상: {selected_class if selected_class != '전체' else '전체 학급'}
-- 총원 {total_students}명 중 {submitted_count}명 제출 완료 (제출률 {submission_rate:.1f}%)
-- 과제 제출자 평균 점수는 {avg_score:.1f}점입니다.
-- 현재 미제출 학생은 총 {not_submitted_count}명이며, 보완이 필요한 학생들에 대한 피드백 예정입니다.
-- 모둠별 참여도 분석 결과, 평균 점수가 가장 낮은 모둠은 [{group_chart_data.loc[group_chart_data['score'].idxmin(), 'group'] if not group_chart_data.empty else '없음'}] 입니다."""
+    if selected_class != "전체":
+        df = df[df['class'] == selected_class]
 
-st.code(summary_text, language="markdown")
-if st.button("📋 브리핑 문구 복사하기"):
-    st.toast("클립보드 기능은 구현 단계에서 st.code의 우측 상단 복사 버튼을 이용해주세요!")
+    selected_group = st.selectbox(
+        "모둠 선택",
+        ["전체"] + sorted(df['group'].unique().tolist())
+    )
+
+    if selected_group != "전체":
+        df = df[df['group'] == selected_group]
+
+    # 제출 여부 계산
+    total_students = len(df)
+    submitted = len(df[df['submission_status'] == '제출'])
+    not_submitted = len(df[df['submission_status'] == '미제출'])
+
+    submission_rate = round((submitted / total_students) * 100, 1)
+
+    avg_score = round(
+        pd.to_numeric(df['score'], errors='coerce').mean(),
+        1
+    )
+
+    # KPI
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("전체 학생", total_students)
+    col2.metric("제출률", f"{submission_rate}%")
+    col3.metric("평균 점수", avg_score)
+    col4.metric("미제출", not_submitted)
+
+    # 모둠별 그래프
+    st.subheader("모둠별 평균 점수")
+
+    group_score = (
+        df.groupby('group')['score']
+        .mean(numeric_only=True)
+        .reset_index()
+    )
+
+    fig = px.bar(
+        group_score,
+        x='group',
+        y='score',
+        color='score'
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 미제출 목록
+    st.subheader("미제출 학생")
+
+    missing_df = df[df['submission_status'] == '미제출']
+
+    st.dataframe(
+        missing_df[['display_name', 'class', 'group']]
+    )
+
+    # 보완 필요 학생
+    st.subheader("보완 필요 학생")
+
+    support_df = df[df['needs_support'] == 'Y']
+
+    st.dataframe(
+        support_df[
+            ['display_name', 'class', 'group', 'score']
+        ]
+    )
+
+    # 회의용 요약
+    st.subheader("회의용 요약")
+
+    summary = f"""
+    현재 제출률은 {submission_rate}%이며,
+    평균 점수는 {avg_score}점입니다.
+    미제출 학생은 {not_submitted}명입니다.
+    """
+
+    st.info(summary)
+```
